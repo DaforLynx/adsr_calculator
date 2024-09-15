@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use std::f64::INFINITY;
 
 use iced::{
@@ -28,7 +30,6 @@ pub struct App {
     release: u8,
     release_f: f32,
     release_input: String,
-    velocity: i32,
     result: String,
     to_nds: bool,
 }
@@ -59,7 +60,7 @@ impl App {
         } else {
             for i in 0..127_u8 {
                 if i != 0 {
-                    while vel > 0 {
+                    while vel < 0 {
                         steps += 1;
                         vel = self.attack_table[i as usize] * vel / 0xff;
                     }
@@ -68,7 +69,7 @@ impl App {
                     }
                 }
                 steps = 0;
-                vel = self.velocity;
+                vel = ZERO_POINT;
             }
             127.0
         }
@@ -110,7 +111,7 @@ impl App {
                 let sus = self.sustain_table[(127 - self.sustain) as usize] as f64;
                 let amplitude = sus / zero_point; // 0 is 1.0, 127 is 0.0
                 let decibels = 20.0 * f64::log10(amplitude.abs());
-                -decibels // Written as "decibels to diminish by" in Polyphone
+                decibels.abs() // Written as "decibels to diminish by" in Polyphone
             }
         } else {
             for i in 0..127_u8 {
@@ -236,7 +237,6 @@ impl Sandbox for App {
             release: 127,
             release_f: 0.0,
             release_input: "".to_string(),
-            velocity: -92544,
             result: "".to_string(),
             to_nds: false,
         }
@@ -261,29 +261,21 @@ impl Sandbox for App {
                     text_input("127", &self.attack_input.to_string())
                         .on_input(Message::AttackChanged),
                     text("Attack"),
-                    text(self.attack.to_string()),
-                    text(self.attack_f.to_string()),
                 ),
                 column!(
                     text_input("127", &self.decay_input.to_string())
                         .on_input(Message::DecayChanged),
                     text("Decay"),
-                    text(self.decay.to_string()),
-                    text(self.decay_f.to_string()),
                 ),
                 column!(
                     text_input("127", &self.sustain_input.to_string())
                         .on_input(Message::SustainChanged),
                     text("Sustain"),
-                    text(self.sustain.to_string()),
-                    text(self.sustain_f.to_string()),
                 ),
                 column!(
                     text_input("127", &self.release_input.to_string())
                         .on_input(Message::ReleaseChanged),
                     text("Release"),
-                    text(self.release.to_string()),
-                    text(self.release_f.to_string()),
                 ),
             ),
             button(text(self.button_text()))
