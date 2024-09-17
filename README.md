@@ -15,3 +15,7 @@ If any decimal values or values other than integers 0-127 are entered, a convers
 If and only if all fields are filled with an integer 0-127, the calculate button will allow conversion to SF2.
 
 If an invalid number is entered, the field will use its default value.
+
+If a result is displayed, you can press "Copy to clipboard" to copy it to your clipboard in order to paste directly in Polyphone, or a spreadsheet.
+
+You can also copy values out of Nitro Studio 2's bank editor and paste them in this app directly by pressing "Paste from clipboard" or pasting into a text box.

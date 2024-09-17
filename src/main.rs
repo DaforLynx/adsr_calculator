@@ -1,11 +1,15 @@
 #![windows_subsystem = "windows"]
 
+extern crate clipboard;
+
 use std::f64::INFINITY;
 
 use iced::{
     widget::{button, column, row, text, text_input},
     Element, Padding, Sandbox, Settings,
 };
+
+use clipboard::{ClipboardContext, ClipboardProvider};
 
 const TPS: f64 = 192.0;
 const ZERO_POINT: i32 = -92544;
@@ -15,21 +19,26 @@ fn main() -> iced::Result {
 }
 
 pub struct App {
+    clipboard: Option<ClipboardContext>,
     attack_table: Vec<i32>,
     decay_table: Vec<i32>,
     sustain_table: Vec<i32>,
     attack: u8,
     attack_f: f32,
     attack_input: String,
+    attack_result: f64,
     decay: u8,
     decay_f: f32,
     decay_input: String,
+    decay_result: f64,
     sustain: u8,
     sustain_f: f32,
     sustain_input: String,
+    sustain_result: f64,
     release: u8,
     release_f: f32,
     release_input: String,
+    release_result: f64,
     result: String,
     to_nds: bool,
 }
@@ -41,6 +50,8 @@ pub enum Message {
     DecayChanged(String),
     SustainChanged(String),
     ReleaseChanged(String),
+    CopyToClipboard,
+    PasteFromClipboard(i32),
 }
 
 impl App {
@@ -157,18 +168,18 @@ impl App {
     }
 
     fn calculate(&mut self, to_nds: bool) {
-        let attack_result = self.calculate_attack(to_nds);
-        let decay_result = self.calculate_decay(to_nds);
-        let sustain_result = self.calculate_sustain(to_nds);
-        let release_result = self.calculate_release(to_nds);
+        self.attack_result = self.calculate_attack(to_nds);
+        self.decay_result = self.calculate_decay(to_nds);
+        self.sustain_result = self.calculate_sustain(to_nds);
+        self.release_result = self.calculate_release(to_nds);
         let result_string = match self.to_nds {
             true => format!(
                 "Attack: {:.0} \nDecay: {:.0} \nSustain: {:.0} \nRelease: {:.0}",
-                attack_result, decay_result, sustain_result, release_result
+                self.attack_result, self.decay_result, self.sustain_result, self.release_result
             ),
             false => format!(
                 "Attack: {:.3} \nDecay: {:.3} \nSustain: {:.3} \nRelease: {:.3}",
-                attack_result, decay_result, sustain_result, release_result
+                self.attack_result, self.decay_result, self.sustain_result, self.release_result
             ),
         };
         self.result = result_string
@@ -188,6 +199,7 @@ impl Sandbox for App {
 
     fn new() -> Self {
         Self {
+            clipboard: None,
             attack_table: [
                 255, 254, 253, 252, 251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241, 240,
                 239, 238, 237, 236, 235, 234, 233, 232, 231, 230, 229, 228, 227, 226, 225, 224,
@@ -228,15 +240,19 @@ impl Sandbox for App {
             attack: 127,
             attack_f: 0.0,
             attack_input: "".to_string(),
+            attack_result: 0.0,
             decay: 127,
             decay_f: 0.0,
             decay_input: "".to_string(),
+            decay_result: 0.0,
             sustain: 127,
             sustain_f: 0.0,
             sustain_input: "".to_string(),
+            sustain_result: 0.0,
             release: 127,
             release_f: 0.0,
             release_input: "".to_string(),
+            release_result: 0.0,
             result: "".to_string(),
             to_nds: false,
         }
@@ -259,29 +275,43 @@ impl Sandbox for App {
             row!(
                 column!(
                     text_input("127", &self.attack_input.to_string())
-                        .on_input(Message::AttackChanged),
+                        .on_input(Message::AttackChanged)
+                        .on_submit(Message::CalculatePressed)
+                        .on_paste(|_| Message::PasteFromClipboard(0)),
                     text("Attack"),
                 ),
                 column!(
                     text_input("127", &self.decay_input.to_string())
-                        .on_input(Message::DecayChanged),
+                        .on_input(Message::DecayChanged)
+                        .on_submit(Message::CalculatePressed)
+                        .on_paste(|_| Message::PasteFromClipboard(1)),
                     text("Decay"),
                 ),
                 column!(
                     text_input("127", &self.sustain_input.to_string())
-                        .on_input(Message::SustainChanged),
+                        .on_input(Message::SustainChanged)
+                        .on_submit(Message::CalculatePressed)
+                        .on_paste(|_| Message::PasteFromClipboard(2)),
                     text("Sustain"),
                 ),
                 column!(
                     text_input("127", &self.release_input.to_string())
-                        .on_input(Message::ReleaseChanged),
+                        .on_input(Message::ReleaseChanged)
+                        .on_submit(Message::CalculatePressed)
+                        .on_paste(|_| Message::PasteFromClipboard(3)),
                     text("Release"),
                 ),
             ),
             button(text(self.button_text()))
                 .on_press(Message::CalculatePressed)
                 .padding(Padding::from([10, 20])),
-            text(self.result.to_string())
+            text(self.result.to_string()),
+            button(text("Copy to clipboard".to_string()))
+                .on_press(Message::CopyToClipboard)
+                .padding(Padding::from([10, 20])),
+            button(text("Paste from clipboard".to_string()))
+                .on_press(Message::PasteFromClipboard(0))
+                .padding(Padding::from([10, 20])),
         )
         .into()
     }
@@ -341,6 +371,57 @@ impl Sandbox for App {
                     self.to_nds = true;
                     self.release = 0;
                     self.release_f = s.parse().unwrap_or(0.0)
+                }
+            }
+            Message::CopyToClipboard => {
+                let content = if !self.to_nds {
+                   format!("{:.3}\n\n{:.3}\n{:.3}\n{:.3}", self.attack_result, self.decay_result, self.sustain_result, self.release_result)
+                } else {
+                    format!("{:.0}\t{:.0}\t{:.0}\t{:.0}", self.attack_result, self.decay_result, self.sustain_result, self.release_result)
+                };
+                self.clipboard = Some(ClipboardProvider::new().unwrap());
+                if let Some(ref mut cb) = self.clipboard {
+                    if cb.set_contents(content.to_string()).is_ok() {
+                        let _ = cb.set_contents(content.to_string());
+                    }
+                }
+            }
+            Message::PasteFromClipboard(place) => {
+                self.clipboard = Some(ClipboardProvider::new().unwrap());
+                if let Some(ref mut cb) = self.clipboard {
+                    let content = cb.get_contents().unwrap_or("".to_string());
+                    if !content.is_empty() {
+                        let content_iter = content.split_ascii_whitespace();
+                        let mut count = place;
+                        let mut num = "".to_string();
+                        for s in content_iter {
+                            if s.parse::<u8>().is_ok() {
+                                num = s.parse::<u8>().unwrap().to_string();
+                            } else if s.parse::<f32>().is_ok() {
+                                num = s.parse::<f32>().unwrap().to_string();
+                            } 
+                            match count {
+                                0 => {
+                                    self.attack_input = num.clone();
+                                    self.update(Message::AttackChanged(num.clone()));
+                                }
+                                1 => {
+                                    self.decay_input = num.clone();
+                                    self.update(Message::DecayChanged(num.clone()));
+                                }
+                                2 => {
+                                    self.sustain_input = num.clone();
+                                    self.update(Message::SustainChanged(num.clone()));
+                                }
+                                3 => {
+                                    self.release_input = num.clone();
+                                    self.update(Message::ReleaseChanged(num.clone()));
+                                }
+                                _ => break
+                            }
+                            count += 1;
+                        }
+                    }
                 }
             }
         }
