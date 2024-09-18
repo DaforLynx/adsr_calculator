@@ -191,7 +191,7 @@ impl App {
         match mode {
             Mode::NDS(false) => {
                 if self.sustain == 0 {
-                    0.0
+                    127.0
                 } else {
                     let sus = self.sustain_table[(127 - self.sustain) as usize] as f64;
                     let amplitude = sus / zero_point; // 0 is 1.0, 127 is 0.0
@@ -213,9 +213,13 @@ impl App {
                 127.0
             }
             Mode::GBA(false) => {
-                let amplitude = self.sustain as f64 / 255.0; // 255 is 1.0, 0 is 0.0
-                let decibels = 20.0 * f64::log10(amplitude);
-                decibels.abs()
+                if self.sustain == 0 {
+                    0.0
+                } else {
+                    let amplitude = self.sustain as f64 / 255.0; // 255 is 1.0, 0 is 0.0
+                    let decibels = 20.0 * f64::log10(amplitude);
+                    decibels.abs()
+                }
             }
             Mode::GBA(true) => {
                 for i in 0..255_u16 {
@@ -587,6 +591,8 @@ impl Sandbox for App {
                         self.sustain_result,
                         self.release_result
                     )
+                } else {
+                    "".to_string()
                 };
                 self.clipboard = Some(ClipboardProvider::new().unwrap());
                 if let Some(ref mut cb) = self.clipboard {
@@ -616,7 +622,7 @@ impl Sandbox for App {
                             } else if s.parse::<u8>().is_ok() {
                                 if s.parse::<u8>().unwrap() > 127
                                 && self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
-                                    num = (s.parse::<u8>().unwrap() - 128_u8).to_string();
+                                    num = (s.parse::<u8>().unwrap() >> 1).to_string();
                                 } else {
                                     num = s.parse::<u8>().unwrap().to_string();
                                 }
