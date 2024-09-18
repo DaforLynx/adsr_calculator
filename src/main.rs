@@ -571,7 +571,7 @@ impl Sandbox for App {
                         self.sustain_result,
                         self.release_result
                     )
-                } else if self.mode == Mode::NDS(true) || self.mode == Mode::GBA(true) {
+                } else if self.mode == Mode::NDS(true) {
                     format!(
                         "{:.0}\t{:.0}\t{:.0}\t{:.0}",
                         self.attack_result,
@@ -579,8 +579,14 @@ impl Sandbox for App {
                         self.sustain_result,
                         self.release_result
                     )
-                } else {
-                    "".to_string()
+                } else if self.mode == Mode::GBA(true) {
+                    format!(
+                        "{:.0}, {:.0}, {:.0}, {:.0}",
+                        self.attack_result,
+                        self.decay_result,
+                        self.sustain_result,
+                        self.release_result
+                    )
                 };
                 self.clipboard = Some(ClipboardProvider::new().unwrap());
                 if let Some(ref mut cb) = self.clipboard {
