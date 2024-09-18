@@ -11,7 +11,8 @@ use iced::{
 
 use clipboard::{ClipboardContext, ClipboardProvider};
 
-const TPS: f64 = 192.0;
+const TPS_NDS: f64 = 192.0;
+const TPS_GBA: f64 = 59.7275;
 const ZERO_POINT: i32 = -92544;
 
 fn main() -> iced::Result {
@@ -19,6 +20,7 @@ fn main() -> iced::Result {
 }
 
 pub struct App {
+    mode: Mode,
     clipboard: Option<ClipboardContext>,
     attack_table: Vec<i32>,
     decay_table: Vec<i32>,
@@ -40,12 +42,19 @@ pub struct App {
     release_input: String,
     release_result: f64,
     result: String,
-    to_nds: bool,
+}
+
+/// Console(Putting In?)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mode {
+    NDS(bool),
+    GBA(bool),
 }
 
 #[derive(Clone, Debug)]
 pub enum Message {
     CalculatePressed,
+    ModeSwitchPressed,
     AttackChanged(String),
     DecayChanged(String),
     SustainChanged(String),
@@ -55,142 +64,280 @@ pub enum Message {
 }
 
 impl App {
-    fn calculate_attack(&self, to_nds: bool) -> f64 {
+    fn calculate_attack(&self, mode: Mode) -> f64 {
         let mut steps = 0;
         let mut vel = ZERO_POINT;
-        if !to_nds {
-            if self.attack != 0 {
-                while vel < 0 {
-                    steps += 1;
-                    vel = self.attack_table[self.attack as usize] * vel / 0xff;
-                }
-                steps as f64 / TPS
-            } else {
-                INFINITY
-            }
-        } else {
-            for i in 0..127_u8 {
-                if i != 0 {
+        let mut vol = self.attack as u16;
+        match mode {
+            Mode::NDS(false) => {
+                if self.attack != 0 {
                     while vel < 0 {
                         steps += 1;
-                        vel = self.attack_table[i as usize] * vel / 0xff;
+                        vel = self.attack_table[self.attack as usize] * vel / 0xff;
                     }
-                    if (steps as f64 / TPS) < self.attack_f as f64 {
-                        return i as f64;
+                    steps as f64 / TPS_NDS
+                } else {
+                    INFINITY
+                }
+            }
+            Mode::NDS(true) => {
+                for i in 0..127_usize {
+                    if i != 0 {
+                        while vel < 0 {
+                            steps += 1;
+                            vel = self.attack_table[i] * vel / 0xff;
+                        }
+                        if (steps as f64 / TPS_NDS) < self.attack_f as f64 {
+                            return i as f64;
+                        }
+                    }
+                    steps = 0;
+                    vel = ZERO_POINT;
+                }
+                127.0
+            }
+            Mode::GBA(false) => {
+                if self.attack != 0 {
+                    while vol < 255 {
+                        steps += 1;
+                        vol += self.attack as u16
+                    }
+                    steps as f64 / TPS_GBA
+                } else {
+                    INFINITY
+                }
+            }
+            Mode::GBA(true) => {
+                for i in 0..255_u16 {
+                    if i != 0 {
+                        vol = i;
+                        while vol < 255 {
+                            steps += 1;
+                            vol += i
+                        }
+                        if (steps as f64 / TPS_GBA) < self.attack_f as f64 {
+                            return i as f64;
+                        }
+                        steps = 0;
                     }
                 }
-                steps = 0;
-                vel = ZERO_POINT;
+                255.0
             }
-            127.0
         }
     }
 
-    fn calculate_decay(&self, to_nds: bool) -> f64 {
+    fn calculate_decay(&self, mode: Mode) -> f64 {
         let mut steps = 0;
         let mut vel = 0;
-        if !to_nds {
-            while vel > ZERO_POINT {
-                steps += 1;
-                vel -= self.decay_table[self.decay as usize];
+        let mut vol = 255;
+        match mode {
+            Mode::NDS(false) => {
+                while vel > ZERO_POINT {
+                    steps += 1;
+                    vel -= self.decay_table[self.decay as usize];
+                }
+                steps as f64 / TPS_NDS
             }
-            steps as f64 / TPS
-        } else {
-            for i in 0..127_u8 {
-                if i != 0 {
-                    while vel > ZERO_POINT {
-                        steps += 1;
-                        vel -= self.decay_table[i as usize];
+            Mode::NDS(true) => {
+                for i in 0..127_u8 {
+                    if i != 0 {
+                        while vel > ZERO_POINT {
+                            steps += 1;
+                            vel -= self.decay_table[i as usize];
+                        }
+                        if (steps as f64 / TPS_NDS) < self.decay_f as f64 {
+                            return i as f64;
+                        }
                     }
-                    if (steps as f64 / TPS) < self.decay_f as f64 {
-                        return i as f64;
+                    steps = 0;
+                    vel = 0;
+                }
+                127.0
+            }
+            Mode::GBA(false) => {
+                if self.decay == 0 {
+                    0.0
+                } else if self.decay != 255 {
+                    while vol > 0 {
+                        steps += 1;
+                        vol = (vol * self.decay as u16) >> 8 // "divide by 255"
+                    }
+                    steps as f64 / TPS_GBA
+                } else {
+                    INFINITY
+                }
+            }
+            Mode::GBA(true) => {
+                for i in 0..255_u16 {
+                    if i != 255 {
+                        while vol > 0 {
+                            steps += 1;
+                            vol = (vol * i) >> 8
+                        }
+                        if (steps as f64 / TPS_GBA) > self.decay_f as f64 {
+                            return i as f64;
+                        }
+                        steps = 0;
+                        vol = 255;
                     }
                 }
-                steps = 0;
-                vel = 0;
+                1.0
             }
-            127.0
         }
     }
 
-    fn calculate_sustain(&self, to_nds: bool) -> f64 {
+    fn calculate_sustain(&self, mode: Mode) -> f64 {
         let zero_point = ZERO_POINT as f64;
-        if !to_nds {
-            if self.sustain == 0 {
-                0.0
-            } else {
-                let sus = self.sustain_table[(127 - self.sustain) as usize] as f64;
-                let amplitude = sus / zero_point; // 0 is 1.0, 127 is 0.0
-                let decibels = 20.0 * f64::log10(amplitude.abs());
-                decibels.abs() // Written as "decibels to diminish by" in Polyphone
-            }
-        } else {
-            for i in 0..127_u8 {
-                if i != 127 {
-                    let sus = self.sustain_table[(127 - i) as usize] as f64;
-                    let amplitude = sus / zero_point;
+        match mode {
+            Mode::NDS(false) => {
+                if self.sustain == 0 {
+                    0.0
+                } else {
+                    let sus = self.sustain_table[(127 - self.sustain) as usize] as f64;
+                    let amplitude = sus / zero_point; // 0 is 1.0, 127 is 0.0
                     let decibels = 20.0 * f64::log10(amplitude.abs());
-                    if f64::from(-self.sustain_f) < decibels {
-                        return i as f64;
-                    }
+                    decibels.abs() // Written as "decibels to diminish by" in Polyphone
                 }
             }
-            127.0
+            Mode::NDS(true) => {
+                for i in 0..127_u8 {
+                    if i != 127 {
+                        let sus = self.sustain_table[(127 - i) as usize] as f64;
+                        let amplitude = sus / zero_point;
+                        let decibels = 20.0 * f64::log10(amplitude.abs());
+                        if f64::from(-self.sustain_f) < decibels {
+                            return i as f64;
+                        }
+                    }
+                }
+                127.0
+            }
+            Mode::GBA(false) => {
+                let amplitude = self.sustain as f64 / 255.0; // 255 is 1.0, 0 is 0.0
+                let decibels = 20.0 * f64::log10(amplitude);
+                decibels.abs()
+            }
+            Mode::GBA(true) => {
+                for i in 0..255_u16 {
+                    if i != 255 {
+                        let amplitude = i as f64 / 255.0;
+                        let decibels = 20.0 * f64::log10(amplitude);
+                        if f64::from(-self.sustain_f) < decibels {
+                            return i as f64;
+                        }
+                    }
+                }
+                255.0
+            }
         }
     }
 
-    fn calculate_release(&self, to_nds: bool) -> f64 {
+    fn calculate_release(&self, mode: Mode) -> f64 {
         let mut steps = 0;
-        let zero = -92544;
         let mut vel = 0;
-        if !to_nds {
-            while vel > zero {
-                steps += 1;
-                vel -= self.decay_table[self.release as usize]
+        let mut vol = 255;
+        match mode {
+            Mode::NDS(false) => {
+                while vel > ZERO_POINT {
+                    steps += 1;
+                    vel -= self.decay_table[self.release as usize]
+                }
+                steps as f64 / TPS_NDS
             }
-            steps as f64 / TPS
-        } else {
-            for i in 0..127_u8 {
-                if i != 0 {
-                    while vel > zero {
-                        steps += 1;
-                        vel -= self.decay_table[i as usize];
+            Mode::NDS(true) => {
+                for i in 0..127_u8 {
+                    if i != 0 {
+                        while vel > ZERO_POINT {
+                            steps += 1;
+                            vel -= self.decay_table[i as usize];
+                        }
+                        if (steps as f64 / TPS_NDS) < self.release_f as f64 {
+                            return i as f64;
+                        }
                     }
-                    if (steps as f64 / TPS) < self.release_f as f64 {
-                        return i as f64;
+                    steps = 0;
+                    vel = 0;
+                }
+                127.0
+            }
+            Mode::GBA(false) => {
+                if self.release == 0 {
+                    0.0
+                } else if self.release != 255 {
+                    while vol > 0 {
+                        steps += 1;
+                        vol = (vol * self.release as u16) >> 8
+                    }
+                    steps as f64 / TPS_GBA
+                } else {
+                    INFINITY
+                }
+            }
+            Mode::GBA(true) => {
+                for i in 0..255_u16 {
+                    if i != 255 {
+                        while vol > 0 {
+                            steps += 1;
+                            vol = (vol * i as u16) >> 8
+                        }
+                        if (steps as f64 / TPS_GBA) > self.release_f as f64 {
+                            return i as f64;
+                        }
+                        steps = 0;
+                        vol = 255;
                     }
                 }
-                steps = 0;
-                vel = 0;
+                1.0
             }
-            127.0
         }
     }
 
-    fn calculate(&mut self, to_nds: bool) {
-        self.attack_result = self.calculate_attack(to_nds);
-        self.decay_result = self.calculate_decay(to_nds);
-        self.sustain_result = self.calculate_sustain(to_nds);
-        self.release_result = self.calculate_release(to_nds);
-        let result_string = match self.to_nds {
-            true => format!(
+    fn calculate(&mut self, mode: Mode) {
+        self.attack_result = self.calculate_attack(mode);
+        self.decay_result = self.calculate_decay(mode);
+        self.sustain_result = self.calculate_sustain(mode);
+        self.release_result = self.calculate_release(mode);
+        let result_string = match mode {
+            Mode::NDS(false) => format!(
+                "Attack: {:.3} \nDecay: {:.3} \nSustain: {:.3} \nRelease: {:.3}",
+                self.attack_result, self.decay_result, self.sustain_result, self.release_result
+            ),
+            Mode::NDS(true) => format!(
                 "Attack: {:.0} \nDecay: {:.0} \nSustain: {:.0} \nRelease: {:.0}",
                 self.attack_result, self.decay_result, self.sustain_result, self.release_result
             ),
-            false => format!(
+            Mode::GBA(false) => format!(
                 "Attack: {:.3} \nDecay: {:.3} \nSustain: {:.3} \nRelease: {:.3}",
+                self.attack_result, self.decay_result, self.sustain_result, self.release_result
+            ),
+            Mode::GBA(true) => format!(
+                "Attack: {:.0} \nDecay: {:.0} \nSustain: {:.0} \nRelease: {:.0}",
                 self.attack_result, self.decay_result, self.sustain_result, self.release_result
             ),
         };
         self.result = result_string
     }
 
-    fn button_text(&self) -> String {
-        if self.to_nds {
-            "To SDAT".to_string()
-        } else {
-            "To SF2".to_string()
+    fn calculate_button_text(&self) -> String {
+        match self.mode {
+            Mode::NDS(true) => "To SDAT".to_string(),
+            Mode::GBA(true) => "To Sappy".to_string(),
+            Mode::NDS(false) | Mode::GBA(false) => "To SF2".to_string(),
         }
+    }
+
+    fn mode_switch_button_text(&self) -> String {
+        match self.mode {
+            Mode::NDS(false) | Mode::NDS(true) => "Switch to GBA".to_string(),
+            Mode::GBA(false) | Mode::GBA(true) => "Switch to NDS".to_string(),
+        }
+    }
+
+    fn refresh_fields(&mut self) {
+        self.update(Message::AttackChanged(self.attack_input.clone()));
+        self.update(Message::DecayChanged(self.decay_input.clone()));
+        self.update(Message::SustainChanged(self.sustain_input.clone()));
+        self.update(Message::ReleaseChanged(self.release_input.clone()));
     }
 }
 
@@ -199,6 +346,7 @@ impl Sandbox for App {
 
     fn new() -> Self {
         Self {
+            mode: Mode::NDS(false),
             clipboard: None,
             attack_table: [
                 255, 254, 253, 252, 251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241, 240,
@@ -254,7 +402,6 @@ impl Sandbox for App {
             release_input: "".to_string(),
             release_result: 0.0,
             result: "".to_string(),
-            to_nds: false,
         }
     }
 
@@ -302,16 +449,14 @@ impl Sandbox for App {
                     text("Release"),
                 ),
             ),
-            button(text(self.button_text()))
+            button(text(self.calculate_button_text()))
                 .on_press(Message::CalculatePressed)
                 .padding(Padding::from([10, 20])),
             text(self.result.to_string()),
-            button(text("Copy to clipboard".to_string()))
-                .on_press(Message::CopyToClipboard)
-                .padding(Padding::from([10, 20])),
+            button(text(self.mode_switch_button_text())).on_press(Message::ModeSwitchPressed),
+            button(text("Copy to clipboard".to_string())).on_press(Message::CopyToClipboard),
             button(text("Paste from clipboard".to_string()))
-                .on_press(Message::PasteFromClipboard(0))
-                .padding(Padding::from([10, 20])),
+                .on_press(Message::PasteFromClipboard(0)),
         )
         .into()
     }
@@ -321,9 +466,21 @@ impl Sandbox for App {
             Message::CalculatePressed => {
                 if !self.attack == 0 || !self.decay == 0 || !self.sustain == 0 || !self.release == 0
                 {
-                    self.to_nds = false
+                    if self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
+                        self.mode = Mode::NDS(false)
+                    } else if self.mode == Mode::GBA(true) || self.mode == Mode::GBA(false) {
+                        self.mode = Mode::GBA(false)
+                    }
                 }
-                self.calculate(self.to_nds)
+                self.calculate(self.mode.clone())
+            }
+            Message::ModeSwitchPressed => {
+                match self.mode {
+                    Mode::NDS(false) => self.mode = Mode::GBA(false),
+                    Mode::NDS(true) => self.mode = Mode::GBA(true),
+                    Mode::GBA(false) | Mode::GBA(true) => self.mode = Mode::NDS(true),
+                };
+                self.refresh_fields();
             }
             Message::AttackChanged(s) => {
                 if string_is_int(s.clone()) {
@@ -332,7 +489,11 @@ impl Sandbox for App {
                     self.attack = s.parse().unwrap()
                 } else {
                     self.attack_input = s.clone();
-                    self.to_nds = true;
+                    if self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
+                        self.mode = Mode::NDS(true)
+                    } else if self.mode == Mode::GBA(true) || self.mode == Mode::GBA(false) {
+                        self.mode = Mode::GBA(true)
+                    }
                     self.attack = 0;
                     self.attack_f = s.parse().unwrap_or(0.0)
                 }
@@ -344,7 +505,11 @@ impl Sandbox for App {
                     self.decay = s.parse().unwrap()
                 } else {
                     self.decay_input = s.clone();
-                    self.to_nds = true;
+                    if self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
+                        self.mode = Mode::NDS(true)
+                    } else if self.mode == Mode::GBA(true) || self.mode == Mode::GBA(false) {
+                        self.mode = Mode::GBA(true)
+                    }
                     self.decay = 0;
                     self.decay_f = s.parse().unwrap_or(0.0)
                 }
@@ -356,7 +521,11 @@ impl Sandbox for App {
                     self.sustain = s.parse().unwrap()
                 } else {
                     self.sustain_input = s.clone();
-                    self.to_nds = true;
+                    if self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
+                        self.mode = Mode::NDS(true)
+                    } else if self.mode == Mode::GBA(true) || self.mode == Mode::GBA(false) {
+                        self.mode = Mode::GBA(true)
+                    }
                     self.sustain = 0;
                     self.sustain_f = s.parse().unwrap_or(0.0)
                 }
@@ -368,16 +537,34 @@ impl Sandbox for App {
                     self.release = s.parse().unwrap()
                 } else {
                     self.release_input = s.clone();
-                    self.to_nds = true;
+                    if self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
+                        self.mode = Mode::NDS(true)
+                    } else if self.mode == Mode::GBA(true) || self.mode == Mode::GBA(false) {
+                        self.mode = Mode::GBA(true)
+                    }
                     self.release = 0;
                     self.release_f = s.parse().unwrap_or(0.0)
                 }
             }
             Message::CopyToClipboard => {
-                let content = if !self.to_nds {
-                   format!("{:.3}\n\n{:.3}\n{:.3}\n{:.3}", self.attack_result, self.decay_result, self.sustain_result, self.release_result)
+                let content = if self.mode == Mode::NDS(false) || self.mode == Mode::GBA(false) {
+                    format!(
+                        "{:.3}\n\n{:.3}\n{:.3}\n{:.3}",
+                        self.attack_result,
+                        self.decay_result,
+                        self.sustain_result,
+                        self.release_result
+                    )
+                } else if self.mode == Mode::NDS(true) || self.mode == Mode::GBA(true) {
+                    format!(
+                        "{:.0}\t{:.0}\t{:.0}\t{:.0}",
+                        self.attack_result,
+                        self.decay_result,
+                        self.sustain_result,
+                        self.release_result
+                    )
                 } else {
-                    format!("{:.0}\t{:.0}\t{:.0}\t{:.0}", self.attack_result, self.decay_result, self.sustain_result, self.release_result)
+                    "".to_string()
                 };
                 self.clipboard = Some(ClipboardProvider::new().unwrap());
                 if let Some(ref mut cb) = self.clipboard {
@@ -391,15 +578,24 @@ impl Sandbox for App {
                 if let Some(ref mut cb) = self.clipboard {
                     let content = cb.get_contents().unwrap_or("".to_string());
                     if !content.is_empty() {
-                        let content_iter = content.split_ascii_whitespace();
+                        let content_no_commas = content.split(",").collect::<String>();
+                        let content_iter = content_no_commas.split_ascii_whitespace().to_owned();
                         let mut count = place;
+                        let mut encountered_first_exclamation = false; // In Polyphone, this corresponds to "hold"
                         let mut num = "".to_string();
                         for s in content_iter {
-                            if s.parse::<u8>().is_ok() {
+                            if s == "!" {
+                                if encountered_first_exclamation {
+                                    num = "0".to_string();
+                                } else {
+                                    encountered_first_exclamation = true;
+                                    continue;
+                                }
+                            } else if s.parse::<u8>().is_ok() {
                                 num = s.parse::<u8>().unwrap().to_string();
                             } else if s.parse::<f32>().is_ok() {
                                 num = s.parse::<f32>().unwrap().to_string();
-                            } 
+                            }
                             match count {
                                 0 => {
                                     self.attack_input = num.clone();
@@ -417,7 +613,7 @@ impl Sandbox for App {
                                     self.release_input = num.clone();
                                     self.update(Message::ReleaseChanged(num.clone()));
                                 }
-                                _ => break
+                                _ => break,
                             }
                             count += 1;
                         }
@@ -430,13 +626,17 @@ impl Sandbox for App {
             && string_is_int(self.sustain_input.clone())
             && string_is_int(self.release_input.clone())
         {
-            self.to_nds = false
+            if self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
+                self.mode = Mode::NDS(false)
+            } else if self.mode == Mode::GBA(true) || self.mode == Mode::GBA(false) {
+                self.mode = Mode::GBA(false)
+            }
         }
     }
 }
 
 fn string_is_int(s: String) -> bool {
-    let x_int_result = s.parse::<u8>();
+    let x_int_result = s.parse::<u16>();
     let x_float_result = s.parse::<f32>();
     if let Ok(_x) = x_int_result {
         true
