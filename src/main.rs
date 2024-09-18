@@ -339,6 +339,22 @@ impl App {
         self.update(Message::SustainChanged(self.sustain_input.clone()));
         self.update(Message::ReleaseChanged(self.release_input.clone()));
     }
+
+    fn string_is_int(&self, s: String) -> bool {
+        let x_int_result = s.parse::<u16>();
+        let x_float_result = s.parse::<f32>();
+        if let Ok(_x) = x_int_result {
+            if self.mode == Mode::NDS(true) && _x > 127 {
+                false
+            } else {
+                true
+            }
+        } else if let Ok(_x) = x_float_result {
+            false
+        } else {
+            false
+        }
+    }
 }
 
 impl Sandbox for App {
@@ -483,7 +499,7 @@ impl Sandbox for App {
                 self.refresh_fields();
             }
             Message::AttackChanged(s) => {
-                if string_is_int(s.clone()) {
+                if self.string_is_int(s.clone()) {
                     self.attack_input = s.clone();
                     self.attack_f = s.clone().parse().unwrap();
                     self.attack = s.parse().unwrap()
@@ -499,7 +515,7 @@ impl Sandbox for App {
                 }
             }
             Message::DecayChanged(s) => {
-                if string_is_int(s.clone()) {
+                if self.string_is_int(s.clone()) {
                     self.decay_input = s.clone();
                     self.decay_f = s.clone().parse().unwrap();
                     self.decay = s.parse().unwrap()
@@ -515,7 +531,7 @@ impl Sandbox for App {
                 }
             }
             Message::SustainChanged(s) => {
-                if string_is_int(s.clone()) {
+                if self.string_is_int(s.clone()) {
                     self.sustain_input = s.clone();
                     self.sustain_f = s.clone().parse().unwrap();
                     self.sustain = s.parse().unwrap()
@@ -531,7 +547,7 @@ impl Sandbox for App {
                 }
             }
             Message::ReleaseChanged(s) => {
-                if string_is_int(s.clone()) {
+                if self.string_is_int(s.clone()) {
                     self.release_input = s.clone();
                     self.release_f = s.clone().parse().unwrap();
                     self.release = s.parse().unwrap()
@@ -586,13 +602,18 @@ impl Sandbox for App {
                         for s in content_iter {
                             if s == "!" {
                                 if encountered_first_exclamation {
-                                    num = "0".to_string();
+                                    num = "0.0".to_string();
                                 } else {
                                     encountered_first_exclamation = true;
                                     continue;
                                 }
                             } else if s.parse::<u8>().is_ok() {
-                                num = s.parse::<u8>().unwrap().to_string();
+                                if s.parse::<u8>().unwrap() > 127
+                                && self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
+                                    num = (s.parse::<u8>().unwrap() - 128_u8).to_string();
+                                } else {
+                                    num = s.parse::<u8>().unwrap().to_string();
+                                }
                             } else if s.parse::<f32>().is_ok() {
                                 num = s.parse::<f32>().unwrap().to_string();
                             }
@@ -621,10 +642,10 @@ impl Sandbox for App {
                 }
             }
         }
-        if string_is_int(self.attack_input.clone())
-            && string_is_int(self.decay_input.clone())
-            && string_is_int(self.sustain_input.clone())
-            && string_is_int(self.release_input.clone())
+        if self.string_is_int(self.attack_input.clone())
+            && self.string_is_int(self.decay_input.clone())
+            && self.string_is_int(self.sustain_input.clone())
+            && self.string_is_int(self.release_input.clone())
         {
             if self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
                 self.mode = Mode::NDS(false)
@@ -632,17 +653,5 @@ impl Sandbox for App {
                 self.mode = Mode::GBA(false)
             }
         }
-    }
-}
-
-fn string_is_int(s: String) -> bool {
-    let x_int_result = s.parse::<u16>();
-    let x_float_result = s.parse::<f32>();
-    if let Ok(_x) = x_int_result {
-        true
-    } else if let Ok(_x) = x_float_result {
-        false
-    } else {
-        false
     }
 }
