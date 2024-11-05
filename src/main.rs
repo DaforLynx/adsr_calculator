@@ -195,7 +195,7 @@ impl App {
                 } else {
                     let sus = self.sustain_table[(127 - self.sustain) as usize] as f64;
                     let amplitude = sus / zero_point; // 0 is 1.0, 127 is 0.0
-                    let decibels = 20.0 * f64::log10(amplitude.abs());
+                    let decibels = (20.0 * f64::log10(amplitude.abs())) / 2.0; // For some reason having a less prominent sustain difference tends to sound more accurate
                     decibels.abs() // Written as "decibels to diminish by" in Polyphone
                 }
             }
@@ -621,7 +621,7 @@ impl Sandbox for App {
                                 }
                             } else if s.parse::<u8>().is_ok() {
                                 if s.parse::<u8>().unwrap() > 127
-                                && self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false) {
+                                && (self.mode == Mode::NDS(true) || self.mode == Mode::NDS(false)) {
                                     num = (s.parse::<u8>().unwrap() >> 1).to_string();
                                 } else {
                                     num = s.parse::<u8>().unwrap().to_string();
